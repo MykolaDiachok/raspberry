@@ -7,4 +7,9 @@
         <Nullable>enable</Nullable>
     </PropertyGroup>
 
+    <ItemGroup>
+      <PackageReference Include="System.Device.Gpio" Version="3.2.0" />
+      <PackageReference Include="ws281x.Net" Version="1.0.6" />
+    </ItemGroup>
+
 </Project>
