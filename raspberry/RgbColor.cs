@@ -2,9 +2,9 @@
 
 public class RgbColor(int r, int g, int b)
 {
-    private int R { get; set; } = r;
-    private int G { get; set; } = g;
-    private int B { get; set; } = b;
+    public int R { get; set; } = r;
+    public int G { get; set; } = g;
+    public int B { get; set; } = b;
     
     public uint ToUint()
     {
