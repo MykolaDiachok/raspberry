@@ -11,6 +11,7 @@
             public int count;          // Number of LEDs
             public int brightness;     // Brightness (0-255)
             public int strip_type;     // LED strip type (e.g., WS2812_STRIP)
+            public IntPtr leds;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -24,16 +25,16 @@
 
         private ws2811_t _controller;
 
-        [DllImport("libws2811", EntryPoint = "ws2811_init")]
+        [DllImport("libws2811", EntryPoint = "ws2811_init", CallingConvention = CallingConvention.Cdecl)]
         private static extern int ws2811_init(ref ws2811_t ws2811);
 
-        [DllImport("libws2811", EntryPoint = "ws2811_render")]
+        [DllImport("libws2811", EntryPoint = "ws2811_render", CallingConvention = CallingConvention.Cdecl)]
         private static extern int ws2811_render(ref ws2811_t ws2811);
 
-        [DllImport("libws2811", EntryPoint = "ws2811_fini")]
+        [DllImport("libws2811", EntryPoint = "ws2811_fini", CallingConvention = CallingConvention.Cdecl)]
         private static extern void ws2811_fini(ref ws2811_t ws2811);
 
-        [DllImport("libws2811", EntryPoint = "ws2811_get_return_t_str")]
+        [DllImport("libws2811", EntryPoint = "ws2811_get_return_t_str", CallingConvention = CallingConvention.Cdecl)]
         private static extern IntPtr ws2811_get_return_t_str(int state);
 
         public int Brightness
@@ -63,7 +64,8 @@
                         invert = 0,
                         count = ledCount,
                         brightness = 255,
-                        strip_type = 0x180810 // WS2812_STRIP
+                        strip_type = 0x180810, // WS2812_STRIP
+                        leds = Marshal.AllocHGlobal(ledCount * sizeof(uint))
                     },
                     new ws2811_channel_t()
                 }
@@ -85,32 +87,11 @@
             }
 
             uint colorValue = color.ToUint();
-            IntPtr ledsPtr = _controller.channels[0].gpionum;
+            IntPtr ledsPtr = _controller.channels[0].leds;
 
             Marshal.WriteInt32(ledsPtr, index * sizeof(uint), (int)colorValue);
         }
         
-        public void SetPixelColor(int index, uint color)
-        {
-            if (index < 0 || index >= _controller.channels[0].count)
-                throw new ArgumentOutOfRangeException(nameof(index));
-
-            unsafe
-            {
-                uint* leds = (uint*)_controller.channels[0].gpionum;
-                leds[index] = color;
-            }
-        }
-
-        public void Render()
-        {
-            var renderResult = ws2811_render(ref _controller);
-            if (renderResult != 0)
-            {
-                var errorMsg = Marshal.PtrToStringAnsi(ws2811_get_return_t_str(renderResult));
-                throw new InvalidOperationException($"Render failed: {errorMsg}");
-            }
-        }
         
         public void Show()
         {
