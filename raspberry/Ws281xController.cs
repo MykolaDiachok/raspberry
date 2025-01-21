@@ -1,161 +1,129 @@
 ﻿    using System.Runtime.InteropServices;
     using raspberry;
-
-    public class Ws281XController
+    namespace raspberry;
+  public class Ws281XController : IDisposable
     {
-        private const string GPIO_BASE_PATH = "/dev/mem"; // Path to memory-mapped I/O
-        private const int GPIO_BASE_ADDRESS = 0x3F200000; // Base address for GPIO
-        private const int BLOCK_SIZE = 4096; // Memory block size
-
-        private IntPtr _gpioMemory; // Pointer to mapped GPIO memory
-        private readonly int _ledCount;
-        private readonly int _pin;
-        public int Brightness { get; set; }
-
-        public Ws281XController(int pin, int ledCount)
+        [StructLayout(LayoutKind.Sequential)]
+        public struct ws2811_channel_t
         {
-            _pin = pin;
-            _ledCount = ledCount;
-            Brightness = 255;
+            public int gpionum;        // GPIO pin number
+            public int invert;         // Invert signal
+            public int count;          // Number of LEDs
+            public int brightness;     // Brightness (0-255)
+            public int strip_type;     // LED strip type (e.g., WS2812_STRIP)
         }
 
-        public bool Initialize()
+        [StructLayout(LayoutKind.Sequential)]
+        public struct ws2811_t
         {
-            int fileDescriptor = open(GPIO_BASE_PATH, 2); // Open /dev/mem
-            if (fileDescriptor < 0)
+            public uint freq;          // Frequency in Hz
+            public int dmanum;         // DMA channel
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 2)]
+            public ws2811_channel_t[] channels; // Channels for LEDs
+        }
+
+        private ws2811_t _controller;
+
+        [DllImport("libws2811", EntryPoint = "ws2811_init")]
+        private static extern int ws2811_init(ref ws2811_t ws2811);
+
+        [DllImport("libws2811", EntryPoint = "ws2811_render")]
+        private static extern int ws2811_render(ref ws2811_t ws2811);
+
+        [DllImport("libws2811", EntryPoint = "ws2811_fini")]
+        private static extern void ws2811_fini(ref ws2811_t ws2811);
+
+        [DllImport("libws2811", EntryPoint = "ws2811_get_return_t_str")]
+        private static extern IntPtr ws2811_get_return_t_str(int state);
+
+        public int Brightness
+        {
+            get => _controller.channels[0].brightness;
+            set
             {
-                Console.WriteLine("Unable to open /dev/mem. Are you running as root?");
-                return false;
-            }
-
-            _gpioMemory = mmap(IntPtr.Zero, BLOCK_SIZE, 3 /* PROT_READ | PROT_WRITE */, 1 /* MAP_SHARED */, fileDescriptor, GPIO_BASE_ADDRESS);
-            if (_gpioMemory == IntPtr.Zero || _gpioMemory == new IntPtr(-1))
-            {
-                Console.WriteLine("Memory mapping failed.");
-                close(fileDescriptor);
-                return false;
-            }
-
-            close(fileDescriptor);
-            SetupPinAsOutput();
-            return true;
-        }
-
-        public void SetColor(uint color)
-        {
-            for (int i = 0; i < _ledCount; i++)
-            {
-                SendBitPattern(color);
-            }
-            Show();
-        }
-
-        public void SetPixelColor(int id, int r, int g, int b)
-        {
-            if (id < 0 || id >= _ledCount) return;
-
-            uint color = (uint)((r << 16) | (g << 8) | b);
-            SendBitPattern(color);
-            Show();
-        }
-
-        public void SetPixelColor(int id, RgbColor color)
-        {
-            SetPixelColor(id, color.R, color.G, color.B);
-        }
-
-        public void SetBrightness(int brightness)
-        {
-            Brightness = Math.Clamp(brightness, 0, 255);
-            uint adjustedColor = (uint)(Brightness << 16 | Brightness << 8 | Brightness);
-            SetColor(adjustedColor);
-        }
-
-        public void Shutdown()
-        {
-            if (_gpioMemory != IntPtr.Zero && _gpioMemory != new IntPtr(-1))
-            {
-                munmap(_gpioMemory, BLOCK_SIZE);
-            }
-        }
-
-        private void SetupPinAsOutput()
-        {
-            int pinRegister = _pin / 10;
-            int pinBit = (_pin % 10) * 3;
-            IntPtr gpioRegister = _gpioMemory + pinRegister * 4;
-
-            uint currentValue = (uint)Marshal.ReadInt32(gpioRegister);
-            currentValue &= ~(7u << pinBit); // Clear the bits for the pin
-            currentValue |= (1u << pinBit); // Set the pin to output
-            Marshal.WriteInt32(gpioRegister, (int)currentValue);
-        }
-
-        private void SendBitPattern(uint color)
-        {
-            for (int i = 23; i >= 0; i--)
-            {
-                if ((color & (1 << i)) != 0)
+                if (value < 0 || value > 255)
                 {
-                    SendHighBit();
+                    throw new ArgumentOutOfRangeException(nameof(value), "Brightness must be between 0 and 255.");
                 }
-                else
-                {
-                    SendLowBit();
-                }
+                _controller.channels[0].brightness = value;
             }
         }
-
-        private void SendHighBit()
+        
+        public Ws281XController(int gpioPin, int ledCount)
         {
-            WriteGpio(1);
-            WaitNanoSeconds(900); // High time
-            WriteGpio(0);
-            WaitNanoSeconds(350); // Low time
-        }
-
-        private void SendLowBit()
-        {
-            WriteGpio(1);
-            WaitNanoSeconds(350); // High time
-            WriteGpio(0);
-            WaitNanoSeconds(900); // Low time
-        }
-
-        private void WriteGpio(int value)
-        {
-            int setOrClearRegister = value == 1 ? 7 : 10; // GPIO Set or Clear
-            IntPtr gpioRegister = _gpioMemory + setOrClearRegister * 4;
-
-            Marshal.WriteInt32(gpioRegister, 1 << _pin);
-        }
-
-        private void WaitNanoSeconds(int nanoseconds)
-        {
-            var start = DateTime.UtcNow.Ticks;
-            long ticksToWait = nanoseconds * 10 / 1000;
-
-            while (DateTime.UtcNow.Ticks - start < ticksToWait)
+            _controller = new ws2811_t
             {
-                // Busy-wait loop for timing
+                freq = 800000,
+                dmanum = 10,
+                channels = new[]
+                {
+                    new ws2811_channel_t
+                    {
+                        gpionum = gpioPin,
+                        invert = 0,
+                        count = ledCount,
+                        brightness = 255,
+                        strip_type = 0x180810 // WS2812_STRIP
+                    },
+                    new ws2811_channel_t()
+                }
+            };
+
+            var initResult = ws2811_init(ref _controller);
+            if (initResult != 0)
+            {
+                var errorMsg = Marshal.PtrToStringAnsi(ws2811_get_return_t_str(initResult));
+                throw new InvalidOperationException($"Failed to initialize WS281x: {errorMsg}");
             }
         }
 
+        public void SetPixelColor(int index, RgbColor color)
+        {
+            if (index < 0 || index >= _controller.channels[0].count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(index), "Invalid LED index.");
+            }
+
+            uint colorValue = color.ToUint();
+            IntPtr ledsPtr = _controller.channels[0].gpionum;
+
+            Marshal.WriteInt32(ledsPtr, index * sizeof(uint), (int)colorValue);
+        }
+        
+        public void SetPixelColor(int index, uint color)
+        {
+            if (index < 0 || index >= _controller.channels[0].count)
+                throw new ArgumentOutOfRangeException(nameof(index));
+
+            unsafe
+            {
+                uint* leds = (uint*)_controller.channels[0].gpionum;
+                leds[index] = color;
+            }
+        }
+
+        public void Render()
+        {
+            var renderResult = ws2811_render(ref _controller);
+            if (renderResult != 0)
+            {
+                var errorMsg = Marshal.PtrToStringAnsi(ws2811_get_return_t_str(renderResult));
+                throw new InvalidOperationException($"Render failed: {errorMsg}");
+            }
+        }
+        
         public void Show()
         {
-            // Placeholder method for rendering updates to LEDs.
-            Console.WriteLine("LEDs updated.");
+            var renderResult = ws2811_render(ref _controller);
+            if (renderResult != 0)
+            {
+                var errorMsg = Marshal.PtrToStringAnsi(ws2811_get_return_t_str(renderResult));
+                throw new InvalidOperationException($"Render failed: {errorMsg}");
+            }
         }
 
-        [DllImport("libc.so.6", SetLastError = true)]
-        private static extern IntPtr mmap(IntPtr addr, int length, int prot, int flags, int fd, int offset);
-
-        [DllImport("libc.so.6", SetLastError = true)]
-        private static extern int munmap(IntPtr addr, int length);
-
-        [DllImport("libc.so.6", SetLastError = true)]
-        private static extern int open(string pathname, int flags);
-
-        [DllImport("libc.so.6", SetLastError = true)]
-        private static extern int close(int fd);
+        public void Dispose()
+        {
+            ws2811_fini(ref _controller);
+        }
     }

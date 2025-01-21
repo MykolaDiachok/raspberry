@@ -5,11 +5,19 @@
         <TargetFramework>net9.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
 
     <ItemGroup>
       <PackageReference Include="System.Device.Gpio" Version="3.2.0" />
       <PackageReference Include="ws281x.Net" Version="1.0.6" />
     </ItemGroup>
-
+    <ItemGroup>
+        <Content Include="NativeLibs/libws2811.a">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </Content>
+    </ItemGroup>
+    <Target Name="LinkNativeLibrary" AfterTargets="Build">
+        <Exec Command="gcc -shared -o $(OutDir)/libws2811.so -Wl,-soname,libws2811.so NativeLibs/libws2811.a" />
+    </Target>
 </Project>
