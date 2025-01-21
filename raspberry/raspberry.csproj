@@ -21,6 +21,6 @@
         </Content>
     </ItemGroup>
     <Target Name="LinkNativeLibrary" AfterTargets="Build">
-        <Exec Command="gcc -shared -o $(OutDir)/libws2811.so -Wl,-soname,libws2811.so NativeLibs/libws2811.a" />
+        <Exec Command="gcc -shared -o $(OutDir)/libws2811.so -Wl,-soname,libws2811.so -L/path/to/dependencies -lother_dependencies NativeLibs/libws2811.a" />
     </Target>
 </Project>
